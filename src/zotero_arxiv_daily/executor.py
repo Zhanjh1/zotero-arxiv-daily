@@ -88,7 +88,21 @@ class Executor:
             samples = '\n'.join([c.title + ' - ' + '\n'.join(c.paths) for c in samples])
             logger.info(f"Selected {len(corpus)} zotero papers:\n{samples}\n...")
         return corpus
-
+        
+    def filter_by_keywords(self, papers, keywords):
+        if not keywords:
+            return papers
+    
+        keywords = [k.lower() for k in keywords]
+    
+        filtered = []
+        for p in papers:
+            text = (p.title + " " + p.abstract).lower()
+            if any(k in text for k in keywords):
+                filtered.append(p)
+    
+        logger.info(f"Keyword filtering: {len(papers)} -> {len(filtered)} papers")
+        return filtered
     
     def run(self):
         corpus = self.fetch_zotero_corpus()
@@ -105,6 +119,10 @@ class Executor:
                 continue
             logger.info(f"Retrieved {len(papers)} {source} papers")
             all_papers.extend(papers)
+            keywords = getattr(self.config.source.arxiv, "keywords", None)
+            if keywords:
+                logger.info(f"Applying keyword filter: {keywords}")
+                all_papers = self.filter_by_keywords(all_papers, keywords)
         logger.info(f"Total {len(all_papers)} papers retrieved from all sources")
         reranked_papers = []
         if len(all_papers) > 0:

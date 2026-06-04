@@ -35,7 +35,7 @@ class ArxivRetriever(BaseRetriever):
         encoded_query = urllib.parse.quote(full_query)
         
         # 请求标准 arXiv export API，单次取 100 篇最新内容
-        api_url = f"https://export.arxiv.org/api/query?search_query={encoded_query}&sortBy=submittedDate&sortOrder=descending&max_results=100"
+        api_url = f"https://export.arxiv.org/api/query?search_query={encoded_query}&sortBy=submittedDate&sortOrder=descending&max_results=2"
         
         logger.info(f"Requesting arXiv API: {api_url}")
         

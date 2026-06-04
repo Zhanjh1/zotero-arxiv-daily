@@ -72,12 +72,87 @@ def extract_first_json_object(text: str) -> dict[str, Any]:
     return {}
 
 
+def extract_json_string_field_fallback(text: str, field_name: str) -> str:
+    """
+    当 JSON 不完整时，尝试从 '"field": "value"' 片段中提取字符串。
+    这是兜底逻辑，不作为主路径。
+
+    例如：
+        {"motivation": "xxx
+    虽然不是合法 JSON，但可以尽量把 xxx 抽出来。
+    """
+    if not text:
+        return ""
+
+    pattern = rf'"{re.escape(field_name)}"\s*:\s*"([^"]*)'
+    match = re.search(pattern, text, flags=re.DOTALL)
+
+    if not match:
+        return ""
+
+    value = match.group(1)
+    value = value.replace("\\n", " ").replace('\\"', '"')
+    value = re.sub(r"\s+", " ", value).strip()
+
+    return value
+
+
+def clean_summary_part(text: str) -> str:
+    """
+    清洗 motivation / method / results 单个字段。
+
+    注意：
+    这里是保守清洗，避免误删有效摘要。
+    """
+    if not text:
+        return ""
+
+    text = str(text).strip()
+
+    # 去掉 markdown code fence
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+
+    # 去掉字段标签
+    text = re.sub(
+        r"^\s*(?:motivation|method|results|result|动机|方法|结果|实验结果)\s*[:：]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # 去掉常见套话
+    text = re.sub(
+        r"^\s*(?:该论文|本文|该研究|这篇论文|这项工作)\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # 如果模型仍然输出了完整 TLDR 前缀，也清理掉
+    text = re.sub(
+        r"^\s*(?:TLDR|TL;DR|中文摘要|一句话摘要|一句话总结|摘要|总结)\s*[:：]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # 去掉外层引号和多余空白
+    text = text.strip().strip("\"'“”‘’").strip()
+
+    # 压缩空白
+    text = re.sub(r"\s+", " ", text)
+
+    # 去掉末尾多余句号，后面统一拼接
+    text = text.rstrip("。；;，, ")
+
+    return text
+
+
 def clean_tldr(text: str) -> str:
     """
-    保守清洗 TLDR。
-
-    只清理明确无用的标签、markdown code fence、外层引号和少量套话。
-    不做过度正则替换，避免误删正常摘要内容。
+    清洗完整 TLDR。
+    用于 fallback 或兼容旧逻辑。
     """
     if not text:
         return ""
@@ -88,7 +163,7 @@ def clean_tldr(text: str) -> str:
     tldr = re.sub(r"^```(?:json)?\s*", "", tldr, flags=re.IGNORECASE)
     tldr = re.sub(r"\s*```$", "", tldr)
 
-    # 如果模型仍然输出了标签前缀，去掉它
+    # 去掉常见标签前缀
     tldr = re.sub(
         r"^\s*(?:TLDR|TL;DR|中文摘要|一句话摘要|一句话总结|摘要|总结)\s*[:：]\s*",
         "",
@@ -111,6 +186,38 @@ def clean_tldr(text: str) -> str:
     tldr = re.sub(r"\s+", " ", tldr)
 
     return tldr
+
+
+def format_three_part_tldr(
+    motivation: str,
+    method: str,
+    results: str,
+) -> str:
+    """
+    将三段式结果拼成统一 TLDR 内容。
+
+    返回格式：
+        动机：xxx。方法：xxx。结果：xxx。
+
+    注意：
+        这里不加最前面的 "TLDR:"。
+        因为你的展示层通常已经有：
+            print(f"TLDR: {paper.tldr}")
+    """
+    motivation = clean_summary_part(motivation)
+    method = clean_summary_part(method)
+    results = clean_summary_part(results)
+
+    if not motivation:
+        motivation = "未提供明确研究动机"
+
+    if not method:
+        method = "未提供明确方法细节"
+
+    if not results:
+        results = "未提供明确实验结果"
+
+    return f"动机：{motivation}。方法：{method}。结果：{results}。"
 
 
 def truncate_text_by_tokens(
@@ -156,11 +263,12 @@ class Paper:
         llm_params: dict,
     ) -> str:
         """
-        使用 LLM 生成一句话中文 TLDR。
+        使用 LLM 生成三段式论文 TLDR：
+            动机：xxx。方法：xxx。结果：xxx。
         """
         if not self.full_text and not self.abstract:
             logger.warning(f"Neither full text nor abstract is provided for {self.url}")
-            return "无法生成摘要：未提供足够文本。"
+            return "动机：未提供明确研究动机。方法：未提供明确方法细节。结果：未提供明确实验结果。"
 
         paper_info = []
 
@@ -181,44 +289,58 @@ class Paper:
         )
 
         system_content = """
-你是一个严谨的论文信息抽取助手。你的任务是根据给定的论文标题、摘要和正文片段，生成一个中文 TLDR。
+你是一个严谨的论文信息抽取助手。你的任务是根据给定的论文标题、摘要和正文片段，从 motivation、method、results 三个角度总结论文。
 
 要求：
 1. 只基于给定文本总结，不要补充文本中没有的信息。
-2. 输出必须是“一句话中文摘要”。
-3. 摘要应直接描述论文的核心贡献、主要方法或核心问题。
-4. 不要使用“该论文”“本文”“这篇论文”“该研究”等开头套话。
-5. 不要输出“TLDR:”“摘要:”等标签。
-6. 不要使用项目符号、编号、换行。
-7. 尽量控制在 40 到 90 个中文字符之间。
-8. 如果信息不足，只能概括已有信息，不要猜测实验结果、数据集、机构或应用场景。
+2. motivation 说明论文要解决的问题、背景痛点或研究动机。
+3. method 说明论文提出的方法、模型、框架或核心技术路线。
+4. results 说明论文报告的实验效果、性能提升、验证结论或应用结果。
+5. 每个字段都必须是中文短句。
+6. 每个字段控制在 20 到 70 个中文字符之间。
+7. 不要输出“该论文”“本文”“这篇论文”“该研究”等开头套话。
+8. 不要输出“Motivation:”“Method:”“Results:”“动机：”“方法：”“结果：”等标签，字段名由 JSON 提供即可。
+9. 如果给定文本中没有明确结果，results 字段写“未提供明确实验结果”。
+10. 如果给定文本中没有明确方法，method 字段写“未提供明确方法细节”。
+11. 如果给定文本中没有明确动机，motivation 字段写“未提供明确研究动机”。
+12. 禁止输出解释、检查过程、思考过程、markdown、代码块或额外文本。
+13. 必须严格返回 JSON 对象，不要在 JSON 外输出任何文字。
 """.strip()
 
-        tldr_schema = {
+        summary_schema = {
             "type": "object",
             "properties": {
-                "tldr": {
+                "motivation": {
                     "type": "string",
-                    "description": "一句话中文论文摘要，不含标签，不以“该论文/本文/这篇论文/该研究”开头。",
-                }
+                    "description": "论文研究动机，中文短句，不含标签。",
+                },
+                "method": {
+                    "type": "string",
+                    "description": "论文核心方法，中文短句，不含标签。",
+                },
+                "results": {
+                    "type": "string",
+                    "description": "论文实验结果或验证结论，中文短句；若文本没有明确结果，写未提供明确实验结果。",
+                },
             },
-            "required": ["tldr"],
+            "required": ["motivation", "method", "results"],
             "additionalProperties": False,
         }
 
         gen_kwargs = llm_params.get("generation_kwargs", {}).copy()
-        gen_kwargs.setdefault("temperature", 0.2)
-        gen_kwargs.setdefault("max_tokens", 256)
+        gen_kwargs.setdefault("temperature", 0.1)
+        gen_kwargs.setdefault("max_tokens", 300)
 
-        # 如果调用方没有显式传入 response_format，则默认使用 JSON Schema
+        # 如果调用方没有显式传入 response_format，则默认使用 JSON Schema。
+        # 如果你的模型或服务端不支持 json_schema，可以删除这一段。
         gen_kwargs.setdefault(
             "response_format",
             {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "paper_tldr",
+                    "name": "paper_structured_tldr",
                     "strict": True,
-                    "schema": tldr_schema,
+                    "schema": summary_schema,
                 },
             },
         )
@@ -237,15 +359,43 @@ class Paper:
             logger.warning(
                 f"Model refused to generate tldr for {self.url}: {message.refusal}"
             )
-            return "（模型拒绝生成摘要）"
+            return "动机：模型拒绝生成摘要。方法：未提供明确方法细节。结果：未提供明确实验结果。"
 
         raw_content = (message.content or "").strip()
+
         data = extract_first_json_object(raw_content)
-        tldr = clean_tldr(data.get("tldr", ""))
+
+        motivation = clean_summary_part(data.get("motivation", ""))
+        method = clean_summary_part(data.get("method", ""))
+        results = clean_summary_part(data.get("results", ""))
+
+        # JSON 不完整时的兜底提取
+        if not motivation:
+            motivation = clean_summary_part(
+                extract_json_string_field_fallback(raw_content, "motivation")
+            )
+
+        if not method:
+            method = clean_summary_part(
+                extract_json_string_field_fallback(raw_content, "method")
+            )
+
+        if not results:
+            results = clean_summary_part(
+                extract_json_string_field_fallback(raw_content, "results")
+            )
+
+        tldr = format_three_part_tldr(
+            motivation=motivation,
+            method=method,
+            results=results,
+        )
 
         if not tldr:
-            logger.warning(f"Failed to parse valid tldr from raw content: {raw_content}")
-            return "（未能提取到有效摘要）"
+            logger.warning(
+                f"Failed to parse valid structured tldr from raw content: {raw_content}"
+            )
+            return "动机：未提供明确研究动机。方法：未提供明确方法细节。结果：未提供明确实验结果。"
 
         return tldr
 
@@ -256,6 +406,9 @@ class Paper:
     ) -> str:
         """
         对外调用入口：生成 TLDR，并写入 self.tldr。
+
+        返回格式：
+            动机：xxx。方法：xxx。结果：xxx。
         """
         try:
             tldr = self._generate_tldr_with_llm(openai_client, llm_params)
@@ -266,11 +419,12 @@ class Paper:
             logger.warning(f"Failed to generate tldr of {self.url}: {e}")
 
             if self.abstract:
-                fallback = clean_tldr(self.abstract[:200]) + "..."
+                abstract = clean_tldr(self.abstract[:180])
+                fallback = f"动机：未提供明确研究动机。方法：{abstract}。结果：未提供明确实验结果。"
             elif self.title:
-                fallback = f"围绕“{self.title}”展开研究，但缺少摘要或正文，无法生成可靠 TLDR。"
+                fallback = f"动机：围绕“{self.title}”展开研究。方法：未提供明确方法细节。结果：未提供明确实验结果。"
             else:
-                fallback = "（未能生成摘要：缺少标题、摘要和正文信息）"
+                fallback = "动机：未提供明确研究动机。方法：未提供明确方法细节。结果：未提供明确实验结果。"
 
             self.tldr = fallback
             return fallback
@@ -312,6 +466,7 @@ class Paper:
 
         system_content = """
 你是一个严谨的学术机构抽取助手。你只能从用户给定文本中抽取明确出现的机构名称，不能猜测、补全或扩写文本中没有的信息。
+必须严格返回 JSON 对象，不要在 JSON 外输出任何文字。
 """.strip()
 
         affiliation_schema = {
@@ -331,7 +486,8 @@ class Paper:
         gen_kwargs.setdefault("temperature", 0)
         gen_kwargs.setdefault("max_tokens", 256)
 
-        # 如果调用方没有显式传入 response_format，则默认使用 JSON Schema
+        # 如果调用方没有显式传入 response_format，则默认使用 JSON Schema。
+        # 如果你的模型或服务端不支持 json_schema，可以删除这一段。
         gen_kwargs.setdefault(
             "response_format",
             {

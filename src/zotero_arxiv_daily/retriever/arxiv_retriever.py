@@ -40,7 +40,7 @@ class ArxivRetriever(BaseRetriever):
         logger.info(f"Requesting arXiv API: {api_url}")
         
         try:
-            response = urllib.request.urlopen(api_url, timeout=15)
+            response = urllib.request.urlopen(api_url, timeout=60)
             feed = feedparser.parse(response.read())
         except Exception as e:
             logger.error(f"Failed to fetch from arXiv API: {e}")

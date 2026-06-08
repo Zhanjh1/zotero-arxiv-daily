@@ -337,6 +337,7 @@ class ArxivRetriever(BaseRetriever):
                 url=url,
                 pdf_url=pdf_url,
                 full_text=abstract,
+                publish_date=raw_paper.published.strftime("%Y-%m-%d %H:%M:%S UTC")
             )
 
         except Exception as e:

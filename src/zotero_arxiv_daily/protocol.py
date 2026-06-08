@@ -15,7 +15,22 @@ RawPaperItem = TypeVar("RawPaperItem")
 # =========================
 # 通用工具函数
 # =========================
+def build_generation_kwargs(llm_params: dict) -> dict:
+    raw_kwargs = llm_params.get("generation_kwargs", {})
 
+    try:
+        raw_kwargs = OmegaConf.to_container(raw_kwargs, resolve=True)
+    except Exception:
+        pass
+
+    if raw_kwargs is None:
+        raw_kwargs = {}
+
+    gen_kwargs = dict(raw_kwargs)
+    gen_kwargs.pop("response_format", None)
+
+    return gen_kwargs
+    
 def dedupe_keep_order(items: list[str]) -> list[str]:
     """
     去重但保留原始顺序。

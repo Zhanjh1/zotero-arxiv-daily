@@ -224,6 +224,12 @@ class Executor:
             reranked_papers = reranked_papers[:self.config.executor.max_paper_num]
             
             logger.info("Generating TLDR and affiliations...")
+            for p in reranked_papers:
+                logger.info(
+                    f"[EMAIL CHECK] title={p.title} | "
+                    f"publish_date={getattr(p, 'publish_date', None)} | "
+                    f"affiliations={getattr(p, 'affiliations', None)}"
+                )
             for p in tqdm(reranked_papers):
                 p.generate_tldr(self.openai_client, self.config.llm)
                 p.generate_affiliations(self.openai_client, self.config.llm)

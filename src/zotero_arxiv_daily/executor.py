@@ -80,7 +80,7 @@ class Executor:
         for p, score in selected:
             logger.info(f"{score:.4f} | {p.title}")
 
-    return [p for p, _ in selected]
+        return [p for p, _ in selected]
     
     def fetch_zotero_corpus(self) -> list[CorpusPaper]:
         logger.info("Fetching zotero corpus")
@@ -172,9 +172,16 @@ class Executor:
         unmatched_papers = []
         
         for p in papers:
-            # 综合检索标题和摘要
             search_text = f"{p.title} {p.abstract}"
-            if regex.search(search_text):
+
+            matched_keywords = []
+            for kw, pattern in zip(keywords, patterns):
+                if re.search(pattern, search_text, flags=re.IGNORECASE):
+                    matched_keywords.append(kw)
+
+            p.keyword_matches = matched_keywords
+
+            if matched_keywords:
                 matched_papers.append(p)
             else:
                 unmatched_papers.append(p)

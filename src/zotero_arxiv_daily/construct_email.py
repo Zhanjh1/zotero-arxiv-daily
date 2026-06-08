@@ -63,7 +63,19 @@ def get_block_html(
     affiliations: str = None,
     semantic_score: str = None,
     keyword_matches: str = None,
+    publish_date: str = None,
 ):
+    <tr>
+        <td style="font-size: 14px; color: #333; padding: 8px 0;">
+            <strong>Published:</strong> {publish_date=publish_date}
+        </td>
+    </tr>
+    <tr>
+        <td style="font-size: 14px; color: #333; padding: 8px 0;">
+            <strong>Affiliations:</strong> {affiliations}
+        </td>
+    </tr>
+     
     semantic_score_html = ""
     if semantic_score not in [None, "", "Unknown"]:
         semantic_score_html = f"""
@@ -157,6 +169,10 @@ def render_email(papers: list[Paper]) -> str:
     for p in papers:
         rate = round(p.score, 1) if p.score is not None else 'Unknown'
 
+        publish_date = getattr(p, "publish_date", None)
+          if not publish_date:
+              publish_date = "Unknown Publish Date"
+          
         semantic_score_value = getattr(p, "semantic_score", None)
         if semantic_score_value is not None:
             semantic_score = f"{semantic_score_value:.4f}"
@@ -198,6 +214,7 @@ def render_email(papers: list[Paper]) -> str:
                 affiliations,
                 semantic_score,
                 keyword_matches,
+                publish_date
             )
         )
 

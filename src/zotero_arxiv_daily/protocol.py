@@ -488,65 +488,89 @@ class Paper:
         llm_params: dict,
     ) -> Optional[list[str]]:
         """
-        使用 MiniMax-M2.7 从 full_text 中提取作者机构。
+        从 title / authors / abstract / full_text 中提取作者机构。
+        arXiv API 本身通常不稳定提供 affiliation，所以优先用 full_text，
+        如果没有 full_text，则用 title + authors + abstract 兜底。
         """
-        if self.full_text is None:
+        paper_info = []
+    
+        if self.title:
+            paper_info.append(f"【论文标题】\n{self.title}")
+    
+        if self.authors:
+            paper_info.append(f"【作者列表】\n{', '.join(self.authors)}")
+    
+        if self.abstract:
+            paper_info.append(f"【论文摘要】\n{self.abstract}")
+    
+        if self.full_text:
+            paper_info.append(f"【论文正文片段】\n{self.full_text}")
+    
+        if not paper_info:
+            logger.debug(f"[AFF SKIP] no usable text for title={self.title!r}, url={self.url}")
             return None
-
-        prompt = f"""
-请从以下论文文本中提取作者所属机构。
-
-你必须严格遵守以下规则：
-
-1. 只提取文本中明确出现的机构名称，不要根据作者、邮箱、标题或常识猜测。
-2. 提取最高层级机构名称。
-3. 例如 "Department of Computer Science, Tsinghua University" 只提取 "Tsinghua University"。
-4. 例如 "MIT CSAIL" 如果全文没有更完整机构名，则保留 "MIT CSAIL"。
-5. 可以提取大学、公司、研究院、实验室所属的顶层组织，例如 "Google DeepMind"、"Microsoft Research"、"Stanford University"。
-6. 不要提取国家、城市、邮箱域名、作者姓名、基金项目。
-7. 不要提取 "Department of ..."、"School of ..."、"College of ..." 这类中间层级，除非没有更高层级机构。
-8. 输出英文正式机构名，尽量保留原文写法。
-9. 如果没有明确机构，返回空数组。
-10. 禁止输出解释、检查过程、思考过程、markdown、代码块或额外文本。
-11. 只能返回一个 JSON 对象，不能返回 JSON 数组。
-12. JSON 对象必须包含且只包含一个字段：affiliations。
-
-返回格式必须严格如下：
-{{"affiliations":["Institution A","Institution B"]}}
-
-【论文文本】
-{self.full_text}
-""".strip()
-
-        prompt = truncate_text_by_tokens(
-            prompt,
+    
+        paper_text = "\n\n".join(paper_info)
+    
+        paper_text = truncate_text_by_tokens(
+            paper_text,
             model_name="gpt-4o",
-            max_tokens=2500,
+            max_tokens=3000,
         )
-
+    
+        prompt = f"""
+    请从以下论文信息中提取作者所属机构。
+    
+    你必须严格遵守以下规则：
+    
+    1. 只提取文本中明确出现的机构名称，不要根据作者、邮箱、标题或常识猜测。
+    2. 可以从论文标题、作者列表、摘要、正文片段中提取机构。
+    3. 如果作者列表中出现公司、实验室、学校、研究机构名称，例如 Huixi Intelligence、Tsinghua University、Stanford University、Xiaomi、NVIDIA、Waymo、Tesla、Toyota Research Institute，可以提取。
+    4. 提取最高层级机构名称。
+    5. 例如 "Department of Computer Science, Tsinghua University" 只提取 "Tsinghua University"。
+    6. 例如 "MIT CSAIL" 如果全文没有更完整机构名，则保留 "MIT CSAIL"。
+    7. 可以提取大学、公司、研究院、实验室所属的顶层组织，例如 "Google DeepMind"、"Microsoft Research"、"Stanford University"。
+    8. 不要提取国家、城市、邮箱域名、普通作者姓名、基金项目。
+    9. 不要把普通人名误判为机构。
+    10. 输出英文正式机构名，尽量保留原文写法。
+    11. 如果没有明确机构，返回空数组。
+    12. 禁止输出解释、检查过程、思考过程、markdown、代码块或额外文本。
+    13. 只能返回一个 JSON 对象，不能返回 JSON 数组。
+    14. JSON 对象必须包含且只包含一个字段：affiliations。
+    
+    返回格式必须严格如下：
+    {{"affiliations":["Institution A","Institution B"]}}
+    
+    【论文信息】
+    {paper_text}
+    """.strip()
+    
         system_content = """
-你是一个严谨的学术机构抽取助手。你只能从用户给定文本中抽取明确出现的机构名称，不能猜测、补全或扩写文本中没有的信息。
-
-你只能返回 JSON 对象，不要在 JSON 外输出任何文字。
-
-返回格式：
-{"affiliations":["Institution A","Institution B"]}
-""".strip()
-
-        gen_kwargs = OmegaConf.to_container(
-            llm_params.get("generation_kwargs", {}),
-            resolve=True,
-        )
-        
-        if gen_kwargs is None:
-            gen_kwargs = {}
-        
-        gen_kwargs = dict(gen_kwargs)
-        gen_kwargs.pop("response_format", None)
-
+    你是一个严谨的学术机构抽取助手。
+    你只能从用户给定文本中抽取明确出现的机构名称。
+    不能根据作者姓名、论文题目或常识猜测机构。
+    如果没有明确机构，返回空数组。
+    
+    你只能返回 JSON 对象，不要在 JSON 外输出任何文字。
+    
+    返回格式：
+    {"affiliations":["Institution A","Institution B"]}
+    """.strip()
+    
+        gen_kwargs = build_generation_kwargs(llm_params)
         gen_kwargs.setdefault("temperature", 0)
         gen_kwargs.setdefault("max_tokens", 256)
-
+    
+        logger.debug(
+            f"[AFF REQUEST] title={self.title!r}, "
+            f"url={self.url}, "
+            f"has_abstract={bool(self.abstract)}, "
+            f"has_full_text={bool(self.full_text)}, "
+            f"prompt_chars={len(prompt)}"
+        )
+    
+        logger.debug(f"[AFF GEN_KWARGS] {gen_kwargs}")
+    
         response = openai_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_content},
@@ -554,25 +578,34 @@ class Paper:
             ],
             **gen_kwargs,
         )
-
+    
         message = response.choices[0].message
         raw_content = (message.content or "").strip()
-
+    
+        logger.debug(f"[AFF RAW OUTPUT] title={self.title!r}, url={self.url}\n{raw_content}")
+    
         data = extract_first_json_object(raw_content)
-
+    
+        logger.debug(f"[AFF PARSED JSON] title={self.title!r}, data={data}")
+    
         affiliations = data.get("affiliations", [])
-
+    
         if not isinstance(affiliations, list):
+            logger.warning(
+                f"[AFF PARSE WARNING] affiliations is not list for {self.url}: {affiliations!r}"
+            )
             affiliations = []
-
+    
         affiliations = [
             str(a).strip()
             for a in affiliations
             if str(a).strip()
         ]
-
+    
         affiliations = dedupe_keep_order(affiliations)
-
+    
+        logger.debug(f"[AFF FINAL] title={self.title!r}, affiliations={affiliations}")
+    
         return affiliations
 
     def generate_affiliations(

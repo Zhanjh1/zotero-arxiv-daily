@@ -42,6 +42,46 @@ class Executor:
         self.reranker = get_reranker_cls(config.executor.reranker)(config)
         self.openai_client = OpenAI(api_key=config.llm.api.key, base_url=config.llm.api.base_url)
 
+    def semantic_query_topk(self, papers):
+        if not papers:
+            return papers
+    
+        query = getattr(self.config.source.arxiv, "semantic_query", None)
+        top_k = getattr(self.config.executor, "semantic_top_k", 20)
+    
+        if not query:
+            return papers
+    
+        from sentence_transformers import SentenceTransformer, util
+    
+        logger.info(f"Applying semantic query top-k filtering, top_k={top_k}")
+    
+        model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    
+        query_embedding = model.encode(query, convert_to_tensor=True)
+    
+        paper_texts = [
+            f"{p.title}\n{p.abstract or ''}"
+            for p in papers
+        ]
+    
+        paper_embeddings = model.encode(paper_texts, convert_to_tensor=True)
+        scores = util.cos_sim(paper_embeddings, query_embedding).cpu().numpy().flatten()
+    
+        scored = list(zip(papers, scores))
+        scored.sort(key=lambda x: x[1], reverse=True)
+    
+        selected = scored[:min(top_k, len(scored))]
+    
+        for p, score in selected:
+            p.semantic_score = float(score)
+    
+        logger.info("Semantic query top-k results:")
+        for p, score in selected:
+            logger.info(f"{score:.4f} | {p.title}")
+
+    return [p for p, _ in selected]
+    
     def fetch_zotero_corpus(self) -> list[CorpusPaper]:
         logger.info("Fetching zotero corpus")
         zot = zotero.Zotero(self.config.zotero.user_id, 'user', self.config.zotero.api_key)
@@ -160,7 +200,10 @@ class Executor:
             logger.info(f"Retrieved {len(papers)} {source} papers")
             all_papers.extend(papers)
         logger.info(f"Total {len(all_papers)} papers retrieved from all sources")
-        
+
+        all_papers = self.semantic_query_topk(all_papers)
+        logger.info(f"Total {len(all_papers)} papers after semantic query top-k filtering")
+
         reranked_papers = []
         if len(all_papers) > 0:
             logger.info("Reranking papers...")

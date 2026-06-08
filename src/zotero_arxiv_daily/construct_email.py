@@ -179,8 +179,8 @@ def render_email(papers: list[Paper]) -> str:
         rate = round(p.score, 1) if p.score is not None else 'Unknown'
 
         publish_date = getattr(p, "publish_date", None)
-          if not publish_date:
-              publish_date = "Unknown Publish Date"
+        if not publish_date:
+            publish_date = "Unknown Publish Date"
           
         semantic_score_value = getattr(p, "semantic_score", None)
         if semantic_score_value is not None:

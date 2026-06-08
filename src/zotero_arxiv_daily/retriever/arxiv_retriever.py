@@ -329,6 +329,14 @@ class ArxivRetriever(BaseRetriever):
             if not any(k.lower() in search_str for k in keywords):
                 return None
 
+            published = getattr(raw_paper, "published", None)
+            if hasattr(published, "strftime"):
+                publish_date = published.strftime("%Y-%m-%d %H:%M:%S UTC")
+            elif published:
+                publish_date = str(published)
+            else:
+                publish_date = "Unknown Publish Date"
+                
             return Paper(
                 source="arxiv",
                 title=title,
@@ -337,7 +345,7 @@ class ArxivRetriever(BaseRetriever):
                 url=url,
                 pdf_url=pdf_url,
                 full_text=abstract,
-                publish_date=raw_paper.published.strftime("%Y-%m-%d %H:%M:%S UTC")
+                publish_date=publish_date
             )
 
         except Exception as e:

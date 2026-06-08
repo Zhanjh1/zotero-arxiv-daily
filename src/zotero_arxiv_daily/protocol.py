@@ -7,7 +7,7 @@ import json
 import tiktoken
 from openai import OpenAI
 from loguru import logger
-
+from omegaconf import OmegaConf
 
 RawPaperItem = TypeVar("RawPaperItem")
 
@@ -389,9 +389,15 @@ class Paper:
 {"motivation":"这里写中文动机","method":"这里写中文方法","results":"这里写中文结果"}
 """.strip()
 
-        gen_kwargs = llm_params.get("generation_kwargs", {}).copy()
-
-        # MiniMax-M2.7 不建议传 response_format，很多兼容接口不支持。
+        gen_kwargs = OmegaConf.to_container(
+        llm_params.get("generation_kwargs", {}),
+        resolve=True,
+        )
+    
+        if gen_kwargs is None:
+            gen_kwargs = {}
+        
+        gen_kwargs = dict(gen_kwargs)
         gen_kwargs.pop("response_format", None)
 
         # 降低随机性，减少自言自语和格式漂移
@@ -526,9 +532,15 @@ class Paper:
 {"affiliations":["Institution A","Institution B"]}
 """.strip()
 
-        gen_kwargs = llm_params.get("generation_kwargs", {}).copy()
-
-        # MiniMax-M2.7 兼容处理：不要传 response_format
+        gen_kwargs = OmegaConf.to_container(
+            llm_params.get("generation_kwargs", {}),
+            resolve=True,
+        )
+        
+        if gen_kwargs is None:
+            gen_kwargs = {}
+        
+        gen_kwargs = dict(gen_kwargs)
         gen_kwargs.pop("response_format", None)
 
         gen_kwargs.setdefault("temperature", 0)

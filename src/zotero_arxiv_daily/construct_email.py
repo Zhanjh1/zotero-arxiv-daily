@@ -65,16 +65,25 @@ def get_block_html(
     keyword_matches: str = None,
     publish_date: str = None,
 ):
-    <tr>
-        <td style="font-size: 14px; color: #333; padding: 8px 0;">
-            <strong>Published:</strong> {publish_date=publish_date}
-        </td>
-    </tr>
-    <tr>
-        <td style="font-size: 14px; color: #333; padding: 8px 0;">
-            <strong>Affiliations:</strong> {affiliations}
-        </td>
-    </tr>
+    publish_date_html = ""
+    if publish_date:
+        publish_date_html = f"""
+        <tr>
+            <td style="font-size: 14px; color: #333; padding: 8px 0;">
+                <strong>Published:</strong> {publish_date}
+            </td>
+        </tr>
+        """
+    
+    affiliations_html = ""
+    if affiliations:
+        affiliations_html = f"""
+        <tr>
+            <td style="font-size: 14px; color: #333; padding: 8px 0;">
+                <strong>Affiliations:</strong> {affiliations}
+            </td>
+        </tr>
+        """
      
     semantic_score_html = ""
     if semantic_score not in [None, "", "Unknown"]:

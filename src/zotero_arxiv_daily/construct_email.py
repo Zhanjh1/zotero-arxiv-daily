@@ -115,10 +115,10 @@ def get_block_html(
     <tr>
         <td style="font-size: 14px; color: #666; padding: 8px 0;">
             {authors}
-            <br>
-            <i>{affiliations}</i>
         </td>
     </tr>
+    {publish_date_html}
+    {affiliations_html}
     <tr>
         <td style="font-size: 14px; color: #333; padding: 8px 0;">
             <strong>Relevance:</strong> {rate}
@@ -131,24 +131,24 @@ def get_block_html(
             <strong>TLDR:</strong> {tldr}
         </td>
     </tr>
-
     <tr>
         <td style="padding: 8px 0;">
             <a href="{pdf_url}" style="display: inline-block; text-decoration: none; font-size: 14px; font-weight: bold; color: #fff; background-color: #d9534f; padding: 8px 16px; border-radius: 4px;">PDF</a>
         </td>
     </tr>
-</table>
-"""
+    </table>
+    """
     return block_template.format(
-        title=title,
-        authors=authors,
-        rate=rate,
-        tldr=tldr,
-        pdf_url=pdf_url,
-        affiliations=affiliations,
-        semantic_score_html=semantic_score_html,
-        keyword_matches_html=keyword_matches_html,
-    )
+    title=title,
+    authors=authors,
+    rate=rate,
+    tldr=tldr,
+    pdf_url=pdf_url,
+    publish_date_html=publish_date_html,
+    affiliations_html=affiliations_html,
+    semantic_score_html=semantic_score_html,
+    keyword_matches_html=keyword_matches_html,
+)
 
 
 def get_stars(score: float):
